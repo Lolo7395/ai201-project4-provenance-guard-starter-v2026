@@ -19,6 +19,23 @@ you claim, so that line should read `scoring.py::combine_signals`.
 import config
 
 
+LABEL_HUMAN = (
+    "We think this was probably written by a person. Nothing about it looks "
+    "like machine writing, though no check is perfect."
+)
+LABEL_UNSURE = (
+    "We can't tell whether this was written by a person or by an AI tool. "
+    "Plenty of people write this way, so this is not a judgment about you or "
+    "your work. If you wrote it yourself, you don't need to do anything, and "
+    "you can ask for a review at any time."
+)
+LABEL_AI = (
+    "This looks like it may have been written by an AI tool. We can be wrong, "
+    "especially with plain or simple writing. If you wrote it yourself, please "
+    "appeal and a person will take a look."
+)
+
+
 def combine_signals(model_score: float, style_score: float) -> float:
     """
     Combine two 0–1 signals into one 0–1 score. ← TODO (Milestone 4)
@@ -52,11 +69,16 @@ def combine_signals(model_score: float, style_score: float) -> float:
     The weights in config.py are placeholders. Change them, or ignore them and
     write a different rule.
     """
-    # TODO: replace this
-    return (
+    base = (
         config.WEIGHT_MODEL_SIGNAL * model_score
         + config.WEIGHT_STYLE_SIGNAL * style_score
     )
+    # Two methods that disagree sharply are telling us we don't know. Pull the
+    # score toward 0.5 so a split lands in "unsure" instead of being decided by
+    # whichever signal happened to carry the bigger weight.
+    if abs(model_score - style_score) > config.DISAGREEMENT_GAP:
+        base = 0.5 + (base - 0.5) * config.DISAGREEMENT_SHRINK
+    return round(min(max(base, 0.0), 1.0), 4)
 
 
 def score_to_label(score: float) -> tuple[str, str]:
@@ -85,12 +107,11 @@ def score_to_label(score: float) -> tuple[str, str]:
     think if they got it on their own work. That question is the whole
     milestone.
     """
-    # TODO: replace this — thresholds are in config.py
     if score >= config.AI_THRESHOLD:
-        return "ai", "PLACEHOLDER — write the high-confidence AI label."
+        return "ai", LABEL_AI
     if score <= config.HUMAN_THRESHOLD:
-        return "human", "PLACEHOLDER — write the high-confidence human label."
-    return "unsure", "PLACEHOLDER — write the unsure label."
+        return "human", LABEL_HUMAN
+    return "unsure", LABEL_UNSURE
 
 
 def label_ranges() -> list[tuple[str, str]]:

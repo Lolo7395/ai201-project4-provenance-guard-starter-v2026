@@ -54,8 +54,14 @@ DETECTOR_MAX_TOKENS = 400
 # down BEFORE you code it, and to put the numbers in your README. Whatever you
 # decide, it goes here.
 
-WEIGHT_MODEL_SIGNAL = 0.5
-WEIGHT_STYLE_SIGNAL = 0.5
+WEIGHT_MODEL_SIGNAL = 0.6
+WEIGHT_STYLE_SIGNAL = 0.4
+
+# When the two signals differ by more than this, the combined score is pulled
+# toward 0.5 (keeping DISAGREEMENT_SHRINK of its distance from 0.5), so a split
+# reads as "unsure". See scoring.py::combine_signals.
+DISAGREEMENT_GAP = 0.35
+DISAGREEMENT_SHRINK = 0.5
 
 
 # ─── Thresholds (Milestone 5) ────────────────────────────────────────────────
@@ -101,6 +107,11 @@ RATE_LIMIT_PER_DAY = 200
 # and wrong for anything real — a restart forgets every count, and two copies
 # of the service wouldn't share limits.
 RATE_LIMIT_STORAGE = "memory://"
+
+
+# Longest text /submit accepts, in characters. The model only reads the first
+# 400 tokens anyway, so a huge body is never worth the memory.
+MAX_TEXT_CHARS = 20000
 
 
 # ─── Paths ───────────────────────────────────────────────────────────────────
