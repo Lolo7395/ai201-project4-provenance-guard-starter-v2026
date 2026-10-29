@@ -19,94 +19,65 @@ than a missed detection"* is a real answer.
 
 ---
 
-## Pick numbers you can defend
+## Pick targets you can explain
 
-**Cover at least three of these five areas.** They're prompts, not a form.
+Choose at least **three of the five areas** below.
 
-| Area | A question it could answer |
-|---|---|
-| False positives | How often may a human's writing get called AI? |
-| Score spread | How far apart should clearly-AI and clearly-human text score? |
-| Label coverage | Is every one of your three labels actually reachable? |
-| The appeal path | Does an appeal always change status and always get recorded? |
-| Bad input | What happens when `text` is missing, empty, or enormous? |
+- Wrongly accusing a human writer is more harmful than missing AI text.
+- Each target must pass in **all three trials**. For example, a limit of 1 mistake fails if the results are 2, 1, and 2.
 
-Two things worth knowing before you pick numbers:
+## 1. False positives
 
-- **The expensive mistake is one-sided.** Missing some AI text costs the site a
-  little. Accusing a real writer costs that person a lot. A criterion that
-  treats both errors as equally bad is describing a system nobody would ship.
-- **Unit 8 tests across three trials, and the target has to hold across all
-  three.** Your first signal runs a model, so identical input can score
-  differently twice. A target of "at most 1 in 10" against trials of 2, 1, 2 is
-  a **miss**.
+**Target:** Test 10 simple paragraphs I wrote myself, each 60–120 words long. In each trial, no more than 1 paragraph should be labeled high-confidence AI (combined score above 0.65).
 
----
-## 1. False positives: plain human writing is rarely called AI
+**Why:** Human writers should rarely receive a wrong accusation. Simple writing is especially important to test because predictable wording may trigger the detector.
 
-Of 10 plain, ordinary paragraphs that I wrote myself (about 60–120 words each, no
-fancy vocabulary), at most 1 is labelled high-confidence AI (combined score above
-0.65). The target must hold in each of three repeated runs.
+## 2. Score spread
 
-**Why this target:** On a writing site a wrong accusation costs the writer far
-more than a missed AI text costs the site, and plain writers are exactly who a
-predictability-based detector is most likely to accuse. 1 in 10 is the most I
-will tolerate, and I am deliberately testing plain prose rather than easy ornate prose.
+**Target:** Test 5 clearly-AI paragraphs and 5 clearly-human paragraphs.
 
----
+- The average AI score must be at least 0.30 higher than the average human score.
+- The lowest AI score must be higher than the highest human score.
 
-## 2. Score spread: clearly-AI and clearly-human text separate
+**Why:** The scores should clearly separate these examples. Checking both averages and individual scores prevents averages from hiding overlap.
 
-Over 5 clearly-AI paragraphs and 5 clearly-human paragraphs (casual, lumpy,
-specific), the mean combined score of the AI set is at least 0.30 higher than the
-mean of the human set, and the lowest AI score is still above the highest human score.
+## 3. Label coverage
 
-**Why this target:** If the two groups sit within 0.30 of each other, the score is
-not telling me anything and the labels are noise. Requiring no overlap on the
-extreme examples keeps me from hiding behind averages.
+**Target:** Test `score_to_label` from 0.00 to 1.00 in steps of 0.01.
 
----
+- All 101 scores must return one of exactly three labels.
+- Every label must appear at least once.
+- Scores of 0.51 and 0.95 must return different labels.
+- Actual test submissions must also produce all three labels.
 
-## 3. Label coverage: all three labels reachable, no gaps, confidence matters
+**Why:** Every label should be reachable, and the labels should reflect different confidence levels.
 
-Sweeping the combined score from 0.00 to 1.00 in steps of 0.01, `score_to_label`
-returns one of exactly three labels for all 101 values (0 gaps), and each label is
-produced at least once. Scores 0.51 and 0.95 return different labels. Also, real
-submissions across my test set produce all three labels at least once.
+## 4. Appeal path
 
-**Why this target:** A label that no score can produce is dead text, and a flip at
-exactly 0.5 would call 0.51 and 0.95 the same kind of certain. Real submissions
-have to reach each label, not just the sweep, since the style signal can limit the
-reachable range of the combined score.
+**Target:** Submit 5 appeals using valid `content_id`s.
 
----
+- All 5 return HTTP 200 with status `under_review`.
+- All 5 add an `appeal` entry containing the reasoning to `logs/audit.jsonl`.
+- Original decision entries stay unchanged.
+- An unknown `content_id` returns 404 and adds no log entry.
+- Empty reasoning returns 400.
 
-## 4. Appeal path: every appeal changes status and is recorded
+**Why:** Writers need a reliable way to challenge a decision. Failed appeals must return clear errors.
 
-For 5 appeals on valid `content_id`s, 5 of 5 return HTTP 200 with status
-`under_review`, and 5 of 5 add an `appeal` entry (with the reasoning text) to
-`logs/audit.jsonl` while the original decision entry stays untouched. An appeal for
-an unknown `content_id` returns 404 and writes nothing, and an appeal with empty
-reasoning returns 400.
+## 5. Bad input
 
-**Why this target:** The appeal is the only thing between a wrong accusation and
-nothing at all, so it must work every time, not most of the time. Failures have to
-be loud (404/400) so a typo does not silently look like a recorded appeal.
+**Target:** Test these 6 invalid submissions:
 
----
+1. Missing `text`.
+2. Empty `text`.
+3. Whitespace-only `text`.
+4. `text` that is not a string.
+5. `text` longer than 20,000 characters.
+6. A request body that is not JSON.
 
-## 5. Bad input: malformed requests never crash the service
+Every submission must return a 4xx JSON error with a clear message and be logged as a rejection. None may return a 500 error.
 
-Six bad submissions (missing `text`, empty `text`, whitespace-only `text`, `text`
-that is not a string, `text` over 20,000 characters, and a body that is not JSON)
-each get a 4xx JSON error with a plain message, 0 of 6 return a 500, and each is
-recorded in the audit log as a rejection.
-
-**Why this target:** A crash on malformed input is one of the most common real
-failures, and a rejection with no log entry is an attack I would never see.
-Zero 500s is the only defensible number here because every one of these cases can
-be checked before the model runs.
-
+**Why:** Invalid input should be caught before the model runs. Logging rejections helps identify problems and possible attacks.
 ---
 
 <!-- ─────────────────────────────────────────────────────────────────────────

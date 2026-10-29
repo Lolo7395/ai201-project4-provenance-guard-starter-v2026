@@ -36,16 +36,25 @@
 
 ## What This Does
 
-1. **Arrival.** A client sends `POST /submit` with JSON `{"text", "creator_id"}`.
-2. **Validation (`app.py::submit`).** The body must be a JSON object, and `text` must be present, a string, not blank, and at most 20,000 characters. Anything else gets a 4xx JSON error and a `rejected` line in the audit log. The model never runs on bad input.
-3. **Signal one (`detector.py::model_signal`).** GPT-2 runs locally on the first 400 tokens and measures how predictable the text is. Predictable text gets a high (AI-ish) score from 0 to 1.
-4. **Signal two (`stylometry.py::style_signal`).** My own measures of sentence-length spread, vocabulary variety and punctuation give a second 0–1 score, same direction (higher = more AI-ish). It never looks at meaning.
-5. **Combining (`scoring.py::combine_signals`).** The two scores become one confidence from 0 (human) to 1 (AI). If the signals disagree sharply, the score is pulled toward 0.5.
-6. **Label (`scoring.py::score_to_label`).** The confidence maps to one of three plain-English labels: human, unsure, or AI.
-7. **Log and answer.** A new `content_id` is created, the full decision (both signals, combined score, label, status `decided`) is appended to `logs/audit.jsonl`, and the response carries the label. If the writer disagrees, `POST /appeal` with that `content_id` and their reasoning records the appeal and moves the item to `under_review`.
+1. **Submit.** The client sends `POST /submit` with a JSON object containing `text` and `creator_id`.
 
-**The false-positive path.** A student who writes in short, simple sentences (for example because English is their second language) submits an honest paragraph. GPT-2 finds it predictable (0.68) and my style signal finds even sentence lengths and little punctuation (0.79), so the combined score is 0.73 and they see the high-confidence AI label. That label tells them it can be wrong and to appeal; the appeal records their reasoning, sets the item to `under_review`, and a person looks. The sample run below is exactly this case.
+2. **Validate (`app.py::submit`).** The body must be a JSON object. The `text` must be a nonblank string of at most 20,000 characters. Invalid requests get a 4xx JSON error and a `rejected` audit entry. The model only runs on valid input.
 
+3. **Model score (`detector.py::model_signal`).** Local GPT-2 checks the first 400 tokens for predictability. More predictable text gets a higher AI score, from 0 to 1.
+
+4. **Style score (`stylometry.py::style_signal`).** Sentence lengths, vocabulary variety, and punctuation produce another score from 0 to 1. Higher means more AI-like. This check does not consider meaning.
+
+5. **Combine (`scoring.py::combine_signals`).** The two scores become one score: 0 means human-like and 1 means AI-like. Strong disagreement moves the score toward 0.5.
+
+6. **Label (`scoring.py::score_to_label`).** The final score becomes one of three labels: `human`, `unsure`, or `AI`.
+
+7. **Save and respond.** The system creates a `content_id` and saves both scores, the final score, the label, and status `decided` in `logs/audit.jsonl`. It returns the label. Writers can send `POST /appeal` with their `content_id` and reasoning to record an appeal and change the status to `under_review`.
+
+## Example: a wrong AI label
+
+A student submits their own writing using short, simple sentences. The model gives it 0.68, and the style check gives it 0.79. The combined score is 0.73, so it receives a high-confidence AI label.
+
+The label explains that the result may be wrong and offers an appeal. The student appeals, their reasoning is saved, and the status changes to `under_review` for a person to review.
 ---
 
 ## Signals and Scoring
@@ -56,41 +65,57 @@
      The blind spot is not optional. If you can't name it you don't understand
      the signal yet — and unit 8's attack set is built out of blind spots. -->
 
-### Signal one — the model signal
+### Signal one — model score
 
-**What it measures:** Perplexity under GPT-2: how surprised a language model is by the text, squashed to 0–1 (`detector.py::model_signal`, midpoint perplexity 45). Low perplexity means high score.
+**What it measures:** GPT-2 checks how predictable the text is using perplexity. Lower perplexity gives a higher AI-like score from 0 to 1. The midpoint perplexity is 45.
 
-**Why that might differ between human and AI writing:** A model writes by picking likely next words, so its output is easy for another model to predict. Human writing has odd word choices and abrupt turns.
+**Where:** `detector.py::model_signal`
 
-**What it can't see:** Authorship. It rewards common words in short, ordinary sentences, so plain human writers (second-language writers, younger writers) score as machine-like. My plain-writing samples scored 0.68–0.91. It also reads only the first 400 tokens.
+**Why it may help:** AI often chooses likely words, making its writing predictable. Human writing can have unexpected words and changes.
 
-### Signal two — the style signal
+**Limits:** Predictability cannot prove authorship. Simple human writing can also score as AI-like. My plain-writing samples scored 0.68–0.91. The model checks only the first 400 tokens.
 
-**What it measures:** Three things, in `stylometry.py`, scaled and weighted into one 0–1 score (`style_signal`, higher = more AI-ish):
-- `sentence_length_spread` (weight 0.45): standard deviation of sentence length divided by the mean.
-- `type_token_ratio` (weight 0.25): unique words over words, on the first 100 words only so length doesn't move it.
-- `punctuation_density` (weight 0.30): weighted punctuation per word, with semicolons, dashes, colons, brackets, `!` and `?` counting more than commas. Full stops are ignored.
+### Signal two — style score
 
-**Why that might differ between human and AI writing:** AI prose tends toward even, mid-length sentences and flat punctuation. Human prose is lumpier. On my samples, AI spread was 0.09–0.19 and casual human spread was 0.51–0.81.
+**What it measures:** Three features produce a score from 0 to 1. Higher means more AI-like.
 
-**What it can't see:** Meaning. It can't tell that a short-sentence paragraph is honest, and it is easy to move on purpose: breaking up sentences, adding dashes or exclamation marks, or pasting a quotation shifts the shape without changing the substance. A lightly edited AI paragraph in my tests scored 0.23, which reads as human.
+| Feature | What it checks | Weight |
+|---|---|---|
+| `sentence_length_spread` | Sentence-length variation: standard deviation divided by average length | 0.45 |
+| `type_token_ratio` | Unique words divided by total words, using up to the first 100 words | 0.25 |
+| `punctuation_density` | Weighted punctuation per word; some marks count more than commas, and periods are ignored | 0.30 |
+
+**Where:** `stylometry.py::style_signal`
+
+**Why it may help:** AI writing may have more even sentence lengths and less varied punctuation. In my samples, sentence-length spread was 0.09–0.19 for AI and 0.51–0.81 for casual human writing.
+
+**Limits:** It cannot understand meaning or prove authorship. Changing sentence breaks or punctuation can change the score without changing the message. One lightly edited AI paragraph scored 0.23, making it look human-like.
 
 ### The combining rule
 
-<!-- Write the rule in words, then give the numbers. What happens when the two
-     signals disagree? -->
+**Rule:** Combine both scores, giving the model more weight because style is easier to manipulate. If the scores differ by more than 0.35, move the result halfway toward 0.5 to show uncertainty. Keep the final score between 0 and 1.
 
-**The rule:** A weighted average, leaning on the model signal because the style signal is easier to fool. If the two signals differ by more than 0.35, the result is pulled halfway back toward 0.5, so a real split reads as "unsure" and not as whichever signal carried the bigger weight. The result is clamped to 0–1.
+**Calculation:**
 
-**The numbers:** `combined = 0.6 * model_score + 0.4 * style_score`. If `abs(model_score - style_score) > 0.35` then `combined = 0.5 + (combined - 0.5) * 0.5`. All values live in `config.py` (`WEIGHT_MODEL_SIGNAL`, `WEIGHT_STYLE_SIGNAL`, `DISAGREEMENT_GAP`, `DISAGREEMENT_SHRINK`).
+    combined = 0.6 * model_score + 0.4 * style_score
 
-**Where it lives:** `scoring.py::combine_signals`
+    if abs(model_score - style_score) > 0.35:
+        combined = 0.5 + (combined - 0.5) * 0.5
+
+**Where:** `scoring.py::combine_signals`
+
+**Settings:** `config.py` contains `WEIGHT_MODEL_SIGNAL`, `WEIGHT_STYLE_SIGNAL`, `DISAGREEMENT_GAP`, and `DISAGREEMENT_SHRINK`.
+
+**Example:** A formal human passage scored 0.49 for the model and 0.00 for style. The gap was 0.49, so the rule moved the combined score from 0.292 to 0.396. This produced `unsure`.
+
+**Tradeoff:** Disagreement shows uncertainty, but some human writers receive `unsure` instead of `human`.
 
 <!-- ⚠️ The grader checks your code against that line. If your rule lives
      somewhere else, say where. -->
 
-**A case where my two signals split, and what my rule does with it:** An ornate human passage (semicolons, an em dash, rare words) scored model 0.49 but style 0.00: GPT-2 was unsure while the style signal said "very human". The gap is 0.49, so the rule fires: the weighted average 0.292 is pulled halfway toward 0.5, giving 0.396, which lands in "unsure" and not in "human". Two methods disagreeing is uncertainty, so I let the label say so. The cost is that confident-human formal writers get "unsure" and not a clean pass.
+**When the signals disagree:** A formal human passage scored 0.49 from the model and 0.00 from the style check. The gap of 0.49 triggered the rule, moving the combined score from 0.292 toward 0.5, resulting in 0.396 and the label `unsure`.
 
+This shows uncertainty when the signals disagree, but it can leave real human writers labeled `unsure`.
 ---
 
 ## Label Variants
@@ -100,16 +125,15 @@
 
      Write them for someone who has never heard the word "threshold". -->
 
-| Label | Score range | The exact text a reader sees |
+| Label | Score range | What the reader sees |
 |---|---|---|
-| high-confidence human | 0.00 – 0.35 (score at or below 0.35) | We think this was probably written by a person. Nothing about it looks like machine writing, though no check is perfect. |
-| unsure | above 0.35 and below 0.65 | We can't tell whether this was written by a person or by an AI tool. Plenty of people write this way, so this is not a judgment about you or your work. If you wrote it yourself, you don't need to do anything, and you can ask for a review at any time. |
-| high-confidence AI | 0.65 – 1.00 (score at or above 0.65) | This looks like it may have been written by an AI tool. We can be wrong, especially with plain or simple writing. If you wrote it yourself, please appeal and a person will take a look. |
+| high-confidence human | 0.00–0.35 | This was probably written by a person, but no check is perfect. |
+| unsure | Above 0.35 and below 0.65 | We can't tell whether a person or AI wrote this. Many people write this way. You don't need to do anything, but you can ask for a review anytime. |
+| high-confidence AI | 0.65–1.00 | This may be AI-written. We can be wrong, especially with simple writing. If you wrote it yourself, please appeal for a human review. |
 
-Every score from 0.00 to 1.00 maps to exactly one label (checked in 0.01 steps). 0.51 gets "unsure" and 0.95 gets "AI", and all three labels were produced by real submissions in my test set.
+Every score maps to exactly one label, checked in steps of 0.01. A score of 0.51 gets `unsure`, and 0.95 gets `high-confidence AI`. Real test submissions produced all three labels.
 
-**Why I worded the "unsure" one this way:**
-It says "we can't tell" instead of "maybe AI", says outright that plenty of people write this way, and tells the reader they don't have to do anything. A writer who wrote every word themselves should read it as "the tool is unsure", not "you are suspected".
+**Why the `unsure` message uses this wording:** It makes clear that the tool is uncertain. It reassures writers without accusing them or requiring action.
 
 ---
 
@@ -207,6 +231,9 @@ The original decision line stays as it was and the appeal is appended after it; 
 - *What I asked for:* A combining rule in `scoring.py::combine_signals` that does something sensible when the signals disagree, and three labels written for someone who has never heard of a threshold.
 - *What came back:* A weighted average plus a "pull toward 0.5 when the signals split" rule, and three labels. My calibration run showed plain human paragraphs scoring 0.73–0.88, in the AI band.
 - *What I changed:* I changed the weights to 0.6 / 0.4 because the style signal is easier to fool, and I reworded the AI label to say it can be wrong on plain writing and point to the appeal. I did not loosen criterion 1 to make it pass. It fails on my plain samples (4 of 4 flagged), as a known miss, and fixing it is the next unit's job.
+
+
+
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
