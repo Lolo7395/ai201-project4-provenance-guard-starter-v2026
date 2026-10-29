@@ -54,7 +54,7 @@
 
 A student submits their own writing using short, simple sentences. The model gives it 0.68, and the style check gives it 0.79. The combined score is 0.73, so it receives a high-confidence AI label.
 
-The label explains that the result may be wrong and offers an appeal. The student appeals, their reasoning is saved, and the status changes to `under_review` for a person to review.
+*The label explains that the result may be wrong and offers an appeal. The student appeals, their reasoning is saved, and the status changes to `under_review` for a person to review.
 ---
 
 ## Signals and Scoring
@@ -115,7 +115,7 @@ The label explains that the result may be wrong and offers an appeal. The studen
 
 **When the signals disagree:** A formal human passage scored 0.49 from the model and 0.00 from the style check. The gap of 0.49 triggered the rule, moving the combined score from 0.292 toward 0.5, resulting in 0.396 and the label `unsure`.
 
-This shows uncertainty when the signals disagree, but it can leave real human writers labeled `unsure`.
+*This shows uncertainty when the signals disagree, but it can leave real human writers labeled `unsure`.
 ---
 
 ## Label Variants
@@ -214,7 +214,7 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 ]
 ```
 
-The original decision line stays as it was and the appeal is appended after it; the log is append-only.
+*The original decision line stays as it was and the appeal is appended after it; the log is append-only.
 
 ---
 
